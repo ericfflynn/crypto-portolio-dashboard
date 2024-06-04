@@ -1,2 +1,3 @@
-Application/crypto_portfolio.db
-Application/.DS_Store
+application/crypto_portfolio.db
+application/.DS_Store
+.DS_Store
