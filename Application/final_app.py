@@ -2,15 +2,21 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import os
+from requests import Session
+import json
+from datetime import datetime
+
+
+st.set_page_config(layout="wide")
 api_key = os.environ.get('CMC_API_KEY')
 
+# Establish connection to database
 def get_connection():
     conn = sqlite3.connect('crypto_portfolio.db')
     return conn
 
+# Query raw responses from CMC API
 def get_response_multiple(symbols):
-    from requests import Session
-    import json
     url = 'https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/latest'
     headers = {
         'Accepts': 'application/json',
@@ -24,6 +30,7 @@ def get_response_multiple(symbols):
     response = session.get(url, params=parameters)
     return json.loads(response.text)
 
+# Clean data returned from CMC API
 def clean_response_multiple(symbols):
     data = get_response_multiple(symbols)
     df = pd.DataFrame(
@@ -31,6 +38,7 @@ def clean_response_multiple(symbols):
     )
     return df
 
+#Update prices for all coins in portfolio
 def update_prices():
     conn = get_connection()
     cursor = conn.cursor()
@@ -51,7 +59,7 @@ def update_prices():
     conn.commit()
     conn.close()
 
-# Function to add a new coin to the portfolio
+# Add a new coin to the portfolio
 def add_coin(symbol, amount, cost):
     conn = get_connection()
     c = conn.cursor()
@@ -59,14 +67,30 @@ def add_coin(symbol, amount, cost):
     conn.commit()
     conn.close()
 
-# Function to view the portfolio
-def view_portfolio():
-    conn = get_connection()
-    dfjoin = pd.read_sql('select portfolio.amount, portfolio.cost, prices.* from portfolio left join prices on portfolio.symbol = prices.symbol', conn)
-    conn.close()
-    return dfjoin
+def process_raw_df(raw_df):
+    coins = raw_df[['symbol','amount','cost','price','percent_change_24h','percent_change_7d','percent_change_30d']].copy()
+    coins['avg_price'] = coins['cost'] / coins['amount']
+    coins['value'] = coins['amount']*coins['price']
+    coins['net'] = coins['value'] - coins['cost']
+    coins['%'] = (coins['net'] / coins['cost'])*100
+    coins['X'] = coins['value'] / coins['cost']
+    coins['1d_value'] = coins['value']/((coins['percent_change_24h']/100)+1)
+    coins['1d_net'] = coins['value'] - coins['1d_value']
+    coins['7d_value'] = coins['value']/((coins['percent_change_7d']/100)+1)
+    coins['7d_net'] = coins['value'] - coins['7d_value']
+    coins['30d_value'] = coins['value']/((coins['percent_change_30d']/100)+1)
+    coins['30d_net'] = coins['value'] - coins['30d_value']
+    return coins
 
-# Function to delete a coin from the portfolio
+# View the portfolio
+def view_portfolio():
+    global raw_df
+    conn = get_connection()
+    raw_df = pd.read_sql('select portfolio.symbol as coin, portfolio.amount, portfolio.cost, prices.* from portfolio left join prices on portfolio.symbol = prices.symbol', conn)
+    conn.close()
+    return process_raw_df(raw_df)
+
+# Delete a coin from the portfolio
 def delete_coin(symbol):
     conn = get_connection()
     c = conn.cursor()
@@ -74,7 +98,7 @@ def delete_coin(symbol):
     conn.commit()
     conn.close()
 
-# Function to update a coin's amount and cost
+# Update a coin's amount and cost
 def update_coin(symbol, amount, cost):
     conn = get_connection()
     c = conn.cursor()
@@ -108,12 +132,36 @@ def data_entry_page():
             st.success("Coin deleted from portfolio")
 
 def portfolio_page():
+    portfolio = view_portfolio()
+    last_update = datetime.strptime(min(raw_df['last_updated']), '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %I:%M %p')
+    total_value = sum(portfolio['value'])
+    total_cost = sum(portfolio['cost'])
+    total_net = sum(portfolio['net'])
+    total_percent = total_net / total_cost
+    net_1d = sum(portfolio['1d_net'])
+    net_1d_percent = net_1d / (total_value + net_1d)
+    net_7d = sum(portfolio['7d_net'])
+    net_7d_percent = net_7d / (total_value + net_7d)
+    net_30d = sum(portfolio['30d_net'])
+    net_30d_percent = net_30d / (total_value + net_30d)
+
     st.subheader("Your Portfolio")
+    st.write(f"Last Update: {last_update}", )
+    met1, met2, met3, met4, met5 = st.columns(5)
+    with met1:
+        st.metric(label='Total Value', value='${:,.2f}'.format(total_value))
+    with met2:
+        st.metric(label='All Time Return', value='${:,.2f}'.format(total_net), delta="{:.1%}".format(total_percent))
+    with met3:
+        st.metric(label='Last Day', value='${:,.2f}'.format(net_1d), delta="{:.1%}".format(net_1d_percent))
+    with met4:
+        st.metric(label='Last Week', value='${:,.2f}'.format(net_7d), delta="{:.1%}".format(net_7d_percent))
+    with met5:
+        st.metric(label='Last Month', value='${:,.2f}'.format(net_30d), delta="{:.1%}".format(net_30d_percent))
+
     if st.button("Update Prices"):
         update_prices()
-    df = view_portfolio()
-    st.table(df)
-
+    st.table(portfolio)
 
 # Main app layout
 st.title("Cryptocurrency Portfolio Tracker")
