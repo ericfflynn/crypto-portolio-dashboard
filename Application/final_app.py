@@ -4,8 +4,8 @@ import pandas as pd
 import os
 from requests import Session
 import json
-from datetime import datetime
-
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 api_key = os.environ.get('CMC_API_KEY')
@@ -131,37 +131,74 @@ def data_entry_page():
             delete_coin(delete_symbol)
             st.success("Coin deleted from portfolio")
 
+def create_pie_chart(data, n):
+    data = data.sort_values(by='value', ascending=False).reset_index(drop=True)
+    top_n = data.iloc[:n]
+    other = pd.DataFrame([{
+        'symbol': 'Other',
+        'value': data.iloc[n:]['value'].sum()
+    }])
+    grouped_data = pd.concat([top_n, other], ignore_index=True)
+
+    custom_colors = ['#FF6347', '#FFD700', '#ADFF2F', '#40E0D0', '#1E90FF', '#FF69B4']
+    fig, ax = plt.subplots(figsize=(10, 6))
+    wedges = ax.pie(
+        grouped_data['value'], 
+        labels=grouped_data['symbol'], 
+        autopct='%1.1f%%', 
+        startangle=60,
+        colors=custom_colors,
+        pctdistance=0.85, 
+        labeldistance=1.1, 
+        wedgeprops=dict(width=0.4)  
+    )
+
+    ax.axis('equal')  
+    return fig
+
+
 def portfolio_page():
-    portfolio = view_portfolio()
-    last_update = datetime.strptime(min(raw_df['last_updated']), '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %I:%M %p')
-    total_value = sum(portfolio['value'])
-    total_cost = sum(portfolio['cost'])
-    total_net = sum(portfolio['net'])
-    total_percent = total_net / total_cost
-    net_1d = sum(portfolio['1d_net'])
-    net_1d_percent = net_1d / (total_value + net_1d)
-    net_7d = sum(portfolio['7d_net'])
-    net_7d_percent = net_7d / (total_value + net_7d)
-    net_30d = sum(portfolio['30d_net'])
-    net_30d_percent = net_30d / (total_value + net_30d)
+    try: 
+        portfolio = view_portfolio()
+        last_update = (datetime.strptime(min(raw_df['last_updated']), '%Y-%m-%dT%H:%M:%S.%fZ') - timedelta(hours=4)).strftime('%Y-%m-%d %I:%M %p')
+        total_value = sum(portfolio['value'])
+        total_cost = sum(portfolio['cost'])
+        total_net = sum(portfolio['net'])
+        total_percent = total_net / total_cost
+        net_1d = sum(portfolio['1d_net'])
+        net_1d_percent = net_1d / (total_value + net_1d)
+        net_7d = sum(portfolio['7d_net'])
+        net_7d_percent = net_7d / (total_value + net_7d)
+        net_30d = sum(portfolio['30d_net'])
+        net_30d_percent = net_30d / (total_value + net_30d)
 
-    st.subheader("Your Portfolio")
-    st.write(f"Last Update: {last_update}", )
-    met1, met2, met3, met4, met5 = st.columns(5)
-    with met1:
-        st.metric(label='Total Value', value='${:,.2f}'.format(total_value))
-    with met2:
-        st.metric(label='All Time Return', value='${:,.2f}'.format(total_net), delta="{:.1%}".format(total_percent))
-    with met3:
-        st.metric(label='Last Day', value='${:,.2f}'.format(net_1d), delta="{:.1%}".format(net_1d_percent))
-    with met4:
-        st.metric(label='Last Week', value='${:,.2f}'.format(net_7d), delta="{:.1%}".format(net_7d_percent))
-    with met5:
-        st.metric(label='Last Month', value='${:,.2f}'.format(net_30d), delta="{:.1%}".format(net_30d_percent))
+        st.subheader("Your Portfolio")
+        st.write(f"Last Update: {last_update}", )
+        met1, met2, met3, met4, met5 = st.columns(5)
+        with met1:
+            st.metric(label='Total Value', value='${:,.2f}'.format(total_value))
+        with met2:
+            st.metric(label='All Time Return', value='${:,.2f}'.format(total_net), delta="{:.1%}".format(total_percent))
+        with met3:
+            st.metric(label='Last Day', value='${:,.2f}'.format(net_1d), delta="{:.1%}".format(net_1d_percent))
+        with met4:
+            st.metric(label='Last Week', value='${:,.2f}'.format(net_7d), delta="{:.1%}".format(net_7d_percent))
+        with met5:
+            st.metric(label='Last Month', value='${:,.2f}'.format(net_30d), delta="{:.1%}".format(net_30d_percent))
 
-    if st.button("Update Prices"):
-        update_prices()
-    st.table(portfolio)
+        if st.button("Update Prices"):
+            update_prices()
+            st.rerun()
+        pie, table = st.columns(2)
+        with pie:
+            st.pyplot(create_pie_chart(portfolio, 5))
+        with table:
+            st.dataframe(portfolio[['symbol','amount', 'cost', 'price','avg_price','value','net','%','X']].set_index('symbol'),use_container_width=True)
+    except: 
+        st.error("Error: Please make sure to enter data")
+
+
+
 
 # Main app layout
 st.title("Cryptocurrency Portfolio Tracker")
